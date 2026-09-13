@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <title>Roadtrippers — selftest</title>
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/views.css">
+  <link rel="stylesheet" href="../css/tarkov.css">
+  <style>
+    body { padding: 20px; font-family: monospace; }
+    .ok { color: #9ecb7c; }
+    .fail { color: #e0897f; font-weight: bold; }
+    #out { white-space: pre-wrap; line-height: 1.7; font-size: 13px; }
+    #sandbox { border: 1px dashed #38414d; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <h1>Selftest</h1>
+  <div id="out">bezig…</div>
+  <div id="sandbox"></div>
+
+  <script src="../config.js"></script>
+  <script src="../js/core.js"></script>
+  <script src="../js/store.js"></script>
+  <script src="../js/cloud.js"></script>
+  <script src="../js/model.js"></script>
+  <script src="../js/ui.js"></script>
+  <script src="../js/tab-map.js"></script>
+  <script src="../js/tab-route.js"></script>
+  <script src="../js/tab-activities.js"></script>
+  <script src="../js/tab-campsites.js"></script>
+  <script src="../js/tab-gear.js"></script>
+  <script src="../js/tab-food.js"></script>
+  <script src="../js/tab-budget.js"></script>
+  <script src="../js/tab-log.js"></script>
+
+  <script>
+  (function () {
+    var results = [], pass = 0, fail = 0;
+
+    function check(name, fn) {
+      try {
+        var r = fn();
+        if (r === true || r === undefined) { results.push('OK    ' + name); pass++; }
+        else { results.push('FAIL  ' + name + '  → ' + r); fail++; }
+      } catch (e) {
+        results.push('FAIL  ' + name + '  → ' + (e && e.message) + '\n        ' + (e && e.stack || '').split('\n')[1]);
+        fail++;
+      }
+    }
+
+    var RT = window.RT, S = RT.store, M = RT.model;
+
+    /* ---------- core ---------- */
+    check('RT namespace compleet', function () {
+      ['el', 'uid', 'fmt', 'store', 'model', 'ui', 'cloud', 'icon', 'modal', 'form'].forEach(function (k) {
+        if (!RT[k]) throw new Error('ontbreekt: ' + k);
+      });
+    });
+
+    check('el() bouwt tag, class en id', function () {
+      var n = RT.el('section.foo.bar#baz', { text: 'hoi', dataset: { x: '1' } });
+      if (n.tagName !== 'SECTION') return 'tag=' + n.tagName;
+      if (!n.classList.contains('foo') || !n.classList.contains('bar')) return 'class=' + n.className;
+      if (n.id !== 'baz') return 'id=' + n.id;
+      if (n.textContent !== 'hoi') return 'text=' + n.textContent;
+      if (n.dataset.x !== '1') return 'dataset';
+      return true;
+    });
+
+    check('el() negeert false/null children', function () {
+      var n = RT.el('div', {}, null, false, undefined, 'a', ['b', 'c']);
+      return n.textContent === 'abc' ? true : 'kreeg "' + n.textContent + '"';
+    });
+
+    check('el() bindt events', function () {
+      var hit = 0;
+      var b = RT.el('button', { onClick: function () { hit++; } });
+      b.click();
+      return hit === 1 ? true : 'clicks=' + hit;
+    });
+
+    check('fmt werkt', function () {
+      if (RT.fmt.km(320).indexOf('320') < 0) return 'km';
+      if (RT.fmt.duration(150) !== '2 u 30 min') return 'duration=' + RT.fmt.duration(150);
+      if (RT.fmt.money(12.5).indexOf('12,50') < 0) return 'money=' + RT.fmt.money(12.5);
+      return true;
+    });
+
+    check('icon() geeft svg', function () {
+      return RT.icon('map').indexOf('<svg') === 0 ? true : 'geen svg';
+    });
+
+    /* ---------- store ---------- */
+    S.open('selftest');
+    M.wipeDemo();
+
+    check('store put/get', function () {
+      var id = S.put('activity', { name: 'Test', cost: 5 });
+      var e = S.get(id);
+      if (!e) return 'niet gevonden';
+      if (e.name !== 'Test') return 'name=' + e.name;
+      if (e.kind !== 'activity') return 'kind=' + e.kind;
+      if (!e.updated_at) return 'geen updated_at';
+      return true;
+    });
+
+    check('store patch behoudt andere velden', function () {
+      var id = S.put('activity', { name: 'A', cost: 5 });
+      S.patch(id, { cost: 9 });
+      var e = S.get(id);
+      return (e.name === 'A' && e.cost === 9) ? true : JSON.stringify(e);
+    });
+
+    check('store remove verbergt record maar houdt tombstone', function () {
+      var id = S.put('activity', { name: 'Weg' });
+      S.remove(id);
+      if (S.get(id)) return 'nog zichtbaar';
+      if (!S.items[id] || !S.items[id].deleted) return 'geen tombstone voor sync';
+      return true;
+    });
+
+    check('store.all filtert op kind', function () {
+      M.wipeDemo();
+      S.put('activity', { name: '1' });
+      S.put('campsite', { name: '2' });
+      return (S.all('activity').length === 1 && S.all('campsite').length === 1) ? true :
+        'a=' + S.all('activity').length + ' c=' + S.all('campsite').length;
+    });
+
+    check('export/import round-trip', function () {
+      M.wipeDemo();
+      S.put('activity', { name: 'Behouden', cost: 3 });
+      var json = S.exportJSON();
+      M.wipeDemo();
+      if (S.count('activity') !== 0) return 'niet leeg na wipe';
+      S.importJSON(json, 'merge');
+      var back = S.all('activity');
+      return (back.length === 1 && back[0].name === 'Behouden') ? true : JSON.stringify(back);
+    });
+
+    /* ---------- model: instellingen ---------- */
+    check('settings defaults + opslaan', function () {
+      M.saveSettings({ personA: 'Jonne', personB: 'Sam', capacityA: 18 });
+      var s = M.settings();
+      if (s.personA !== 'Jonne') return 'personA=' + s.personA;
+      if (s.capacityA !== 18) return 'capA=' + s.capacityA;
+      if (s.currency !== '€') return 'default weg';
+      if (M.personName('b') !== 'Sam') return 'personName';
+      return true;
+    });
+
+    /* ---------- gear ---------- */
+    M.wipeDemo();
+    var cA = S.put('container', { name: 'Rugzak', owner: 'a', cols: 5, rows: 7, order: 0 });
+    var cCar = S.put('container', { name: 'Kofferbak', owner: 'shared', cols: 8, rows: 5, order: 0 });
+
+    var G = (function () {
+      // haal de interne helpers op via een render in de sandbox
+      return null;
+    })();
+
+    check('gear in container wordt gevonden', function () {
+      var id = S.put('gear', { name: 'Slaapzak', cat: 'slapen', w: 2, h: 3, weight: 1.4, qty: 1, loc: { type: 'grid', containerId: cA, x: 0, y: 0 } });
+      var inC = M.gearIn(cA);
+      return (inC.length === 1 && inC[0].id === id) ? true : 'gevonden=' + inC.length;
+    });
+
+    check('personWeight telt alleen eigen tassen', function () {
+      M.wipeDemo();
+      cA = S.put('container', { name: 'Rugzak', owner: 'a', cols: 5, rows: 7, order: 0 });
+      cCar = S.put('container', { name: 'Kofferbak', owner: 'shared', cols: 8, rows: 5, order: 0 });
+      S.put('gear', { name: 'X', cat: 'slapen', w: 1, h: 1, weight: 2, qty: 1, loc: { type: 'grid', containerId: cA, x: 0, y: 0 } });
+      S.put('gear', { name: 'Y', cat: 'water', w: 1, h: 1, weight: 10, qty: 1, loc: { type: 'grid', containerId: cCar, x: 0, y: 0 } });
+      var wa = M.personWeight('a');
+      return Math.abs(wa - 2) < 0.001 ? true : 'a=' + wa + ' (kofferbak mag niet meetellen)';
+    });
+
+    check('personWeight vermenigvuldigt met aantal', function () {
+      S.put('gear', { name: 'Z', cat: 'eten', w: 1, h: 1, weight: 0.5, qty: 4, loc: { type: 'grid', containerId: cA, x: 2, y: 0 } });
+      var wa = M.personWeight('a');
+      return Math.abs(wa - 4) < 0.001 ? true : 'a=' + wa + ' (verwacht 2 + 4×0,5 = 4)';
+    });
+
+    check('slot-item telt mee voor de drager', function () {
+      S.put('gear', { name: 'Jas', cat: 'kleding', w: 2, h: 2, weight: 0.8, qty: 1, loc: { type: 'slot', person: 'a', slot: 'jas' } });
+      var wa = M.personWeight('a');
+      if (Math.abs(wa - 4.8) > 0.001) return 'a=' + wa;
+      if (!M.gearInSlot('a', 'jas')) return 'gearInSlot vindt niets';
+      if (M.gearInSlot('b', 'jas')) return 'slot lekt naar persoon b';
+      return true;
+    });
+
+    check('stash bevat items zonder plek', function () {
+      S.put('gear', { name: 'Los', cat: 'overig', w: 1, h: 1, weight: 0.1, qty: 1, loc: { type: 'stash' } });
+      return M.gearInStash().length === 1 ? true : 'stash=' + M.gearInStash().length;
+    });
+
+    check('containerWeight telt alleen die container', function () {
+      var w = M.containerWeight(cCar);
+      return Math.abs(w - 10) < 0.001 ? true : 'kofferbak=' + w;
+    });
+
+    /* ---------- route ---------- */
+    check('dagen sorteren op order', function () {
+      M.wipeDemo();
+      S.put('day', { order: 2, to: 'C' });
+      S.put('day', { order: 0, to: 'A' });
+      S.put('day', { order: 1, to: 'B' });
+      var names = M.days().map(function (d) { return d.to; }).join('');
+      return names === 'ABC' ? true : 'volgorde=' + names;
+    });
+
+    check('totalKm telt op', function () {
+      M.wipeDemo();
+      S.put('day', { order: 0, km: 320 });
+      S.put('day', { order: 1, km: 180 });
+      return M.totalKm() === 500 ? true : 'km=' + M.totalKm();
+    });
+
+    check('dayIndex en dayOptions kloppen', function () {
+      M.wipeDemo();
+      var d1 = S.put('day', { order: 0, to: 'Eerste' });
+      var d2 = S.put('day', { order: 1, to: 'Tweede' });
+      if (M.dayIndex(d2) !== 1) return 'index=' + M.dayIndex(d2);
+      if (M.dayIndex('bestaat-niet') !== -1) return 'onbekende dag geeft ' + M.dayIndex('x');
+      var opts = M.dayOptions();
+      return opts.length === 3 ? true : 'opties=' + opts.length;
+    });
+
+    check('routeLine gebruikt alleen geldige coördinaten', function () {
+      M.wipeDemo();
+      S.put('day', { order: 0, coord: [60.1, 5.2] });
+      S.put('day', { order: 1, coord: null });
+      S.put('day', { order: 2, coord: [61.5, 7.3] });
+      return M.routeLine().length === 2 ? true : 'punten=' + M.routeLine().length;
+    });
+
+    check('validCoord weigert rommel', function () {
+      if (M.validCoord(null)) return 'null geaccepteerd';
+      if (M.validCoord([0, 0])) return '[0,0] geaccepteerd';
+      if (M.validCoord(['a', 'b'])) return 'strings geaccepteerd';
+      if (!M.validCoord([52.1, 5.3])) return 'geldige coord geweigerd';
+      return true;
+    });
+
+    /* ---------- budget ---------- */
+    check('settleUp: 50/50 verrekening', function () {
+      M.wipeDemo();
+      S.put('expense', { desc: 'Tank', amount: 100, paidBy: 'a', split: '50/50', date: '2026-01-01' });
+      var s = M.settleUp();
+      if (Math.abs(s.amount - 50) > 0.001) return 'bedrag=' + s.amount;
+      if (s.from !== 'b' || s.to !== 'a') return 'richting ' + s.from + '→' + s.to;
+      return true;
+    });
+
+    check('settleUp: persoonlijke uitgave', function () {
+      M.wipeDemo();
+      S.put('expense', { desc: 'Souvenir', amount: 40, paidBy: 'a', split: 'b', date: '2026-01-01' });
+      var s = M.settleUp();
+      return (Math.abs(s.amount - 40) < 0.001 && s.from === 'b' && s.to === 'a')
+        ? true : JSON.stringify({ amt: s.amount, from: s.from, to: s.to });
+    });
+
+    check('settleUp: quitte na tegenboeking', function () {
+      M.wipeDemo();
+      S.put('expense', { desc: 'A betaalt', amount: 60, paidBy: 'a', split: '50/50', date: '2026-01-01' });
+      S.put('expense', { desc: 'B betaalt', amount: 60, paidBy: 'b', split: '50/50', date: '2026-01-02' });
+      var s = M.settleUp();
+      return Math.abs(s.amount) < 0.001 ? true : 'restant=' + s.amount;
+    });
+
+    check('expenseTotal telt alles', function () {
+      return M.expenseTotal() === 120 ? true : 'totaal=' + M.expenseTotal();
+    });
+
+    /* ---------- seed ---------- */
+    check('seed() vult elke tab', function () {
+      M.wipeDemo();
+      M.seed();
+      var counts = {
+        day: S.count('day'), activity: S.count('activity'), campsite: S.count('campsite'),
+        container: S.count('container'), gear: S.count('gear'), meal: S.count('meal'),
+        grocery: S.count('grocery'), expense: S.count('expense'), log: S.count('log')
+      };
+      var leeg = Object.keys(counts).filter(function (k) { return !counts[k]; });
+      return leeg.length ? 'leeg: ' + leeg.join(', ') : true;
+    });
+
+    check('seed plaatst geen overlappende gear', function () {
+      var bad = [];
+      M.containers().forEach(function (c) {
+        var occ = {};
+        M.gearIn(c.id).forEach(function (g) {
+          for (var dy = 0; dy < g.h; dy++) for (var dx = 0; dx < g.w; dx++) {
+            var key = (g.loc.x + dx) + ',' + (g.loc.y + dy);
+            if (occ[key]) bad.push(c.name + ' ' + key + ' (' + g.name + ' ↔ ' + occ[key] + ')');
+            occ[key] = g.name;
+          }
+          if (g.loc.x + g.w > c.cols || g.loc.y + g.h > c.rows) {
+            bad.push(g.name + ' valt buiten ' + c.name);
+          }
+        });
+      });
+      return bad.length ? bad.join('; ') : true;
+    });
+
+    check('mapPoints verzamelt alle soorten', function () {
+      M.wipeDemo();
+      S.put('day', { order: 0, coord: [60, 5], to: 'D' });
+      S.put('activity', { name: 'A', coord: [61, 6] });
+      S.put('campsite', { name: 'C', coord: [62, 7] });
+      S.put('waypoint', { name: 'W', coord: [63, 8] });
+      var kinds = M.mapPoints().map(function (p) { return p.kind; }).sort().join(',');
+      return kinds === 'activity,campsite,day,waypoint' ? true : kinds;
+    });
+
+    /* ---------- tabs renderen ---------- */
+    var sandbox = document.getElementById('sandbox');
+    M.wipeDemo();
+    M.seed();
+
+    RT.ui.tabs.forEach(function (t) {
+      check('tab "' + t.id + '" rendert', function () {
+        var div = RT.el('div');
+        sandbox.appendChild(div);
+        t.render(div);
+        if (!div.children.length) return 'geen output';
+        return true;
+      });
+      check('tab "' + t.id + '" telt items', function () {
+        if (!t.count) return true;
+        var n = t.count();
+        return typeof n === 'number' ? true : 'count=' + n;
+      });
+    });
+
+    check('tabvolgorde klopt met de gevraagde tabs', function () {
+      var ids = RT.ui.tabs.map(function (t) { return t.id; }).join(',');
+      var want = 'kaart,route,activiteiten,campsites,gear,eten,budget,logboek';
+      return ids === want ? true : 'kreeg ' + ids;
+    });
+
+    check('gear-raster rendert cellen met de juiste grootte', function () {
+      var grid = sandbox.querySelector('.tk-grid');
+      if (!grid) return 'geen raster gevonden';
+      var cols = grid.style.getPropertyValue('--cols');
+      var items = grid.querySelectorAll('.tk-item');
+      if (!cols) return '--cols niet gezet';
+      if (!items.length) return 'geen items in het raster';
+      var it = items[0];
+      if (!it.style.getPropertyValue('--w')) return '--w niet gezet op item';
+      return true;
+    });
+
+    check('gear-items zijn sleepbaar opgezet', function () {
+      var it = sandbox.querySelector('.tk-item');
+      if (!it) return 'geen item';
+      if (!it.dataset.id) return 'geen data-id';
+      if (!S.get(it.dataset.id)) return 'data-id verwijst nergens heen';
+      return true;
+    });
+
+    check('uitrustingsslots bestaan voor beide personen', function () {
+      var a = sandbox.querySelectorAll('.tk-slot[data-person="a"]').length;
+      var b = sandbox.querySelectorAll('.tk-slot[data-person="b"]').length;
+      return (a === M.SLOTS.length && b === M.SLOTS.length) ? true : 'a=' + a + ' b=' + b;
+    });
+
+    check('cloud-modus klopt met config.js', function () {
+      var overHttp = location.protocol === 'http:' || location.protocol === 'https:';
+      if (!RT.cloud.configured()) {
+        if (RT.cloud.available()) return 'available() moet false zijn zonder config';
+        if (!RT.cloud.unavailableReason()) return 'geen uitleg waarom cloud uit staat';
+        return true;
+      }
+      // config is ingevuld: dan hangt het alleen nog van het protocol af
+      if (overHttp && !RT.cloud.available()) return 'config ingevuld + https, maar available() is false';
+      if (!overHttp && RT.cloud.available()) return 'available() hoort false te zijn op file://';
+      if (!overHttp && !/bestand|file/i.test(RT.cloud.unavailableReason() || '')) {
+        return 'verkeerde uitleg: ' + RT.cloud.unavailableReason();
+      }
+      return true;
+    });
+
+    check('inlogfouten worden naar begrijpelijk Nederlands vertaald', function () {
+      var t = RT.cloud.translateAuthError;
+      // Neon/Better Auth geeft "Invalid origin" als het domein niet in
+      // de trusted domains staat — de app hoort te vertellen wat je dan doet.
+      var origin = t({ message: 'Invalid origin' });
+      if (!/Domains/i.test(origin)) return 'invalid origin niet uitgelegd: ' + origin;
+      if (origin.indexOf(location.origin) < 0) return 'noemt het eigen adres niet: ' + origin;
+
+      if (!/wachtwoord klopt niet/i.test(t({ message: 'Invalid credentials' }))) return 'verkeerde inloggegevens';
+      if (!/bestaat al/i.test(t({ message: 'User already exists' }))) return 'dubbel account';
+      if (!/verbinding/i.test(t({ message: 'network error' }))) return 'netwerkfout';
+      return true;
+    });
+
+    /* ---------- rapport ---------- */
+    S.close();
+    try { localStorage.removeItem('roadtrippers.v1.selftest'); } catch (e) { }
+
+    var out = document.getElementById('out');
+    out.innerHTML = results.map(function (r) {
+      return '<span class="' + (r.indexOf('FAIL') === 0 ? 'fail' : 'ok') + '">' + r.replace(/</g, '&lt;') + '</span>';
+    }).join('\n');
+    out.innerHTML = '<b>RESULTAAT: ' + pass + ' geslaagd, ' + fail + ' gefaald</b>\n\n' + out.innerHTML;
+    document.title = fail ? 'SELFTEST FAILED (' + fail + ')' : 'SELFTEST OK (' + pass + ')';
+  })();
+  </script>
+</body>
+</html>
