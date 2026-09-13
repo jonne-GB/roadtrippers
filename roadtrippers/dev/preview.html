@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roadtrippers — preview</title>
+  <link rel="stylesheet" href="../css/base.css">
+  <link rel="stylesheet" href="../css/views.css">
+  <link rel="stylesheet" href="../css/tarkov.css">
+</head>
+<body>
+  <!--
+    Ontwikkel-preview: vult de app met voorbeelddata (in het geheugen,
+    los van je echte reis) en springt direct naar een tab.
+    Gebruik:  preview.html?tab=gear
+  -->
+  <div id="app"></div>
+  <div id="toasts"></div>
+
+  <script src="../config.js"></script>
+  <script src="../js/core.js"></script>
+  <script src="../js/store.js"></script>
+  <script src="../js/cloud.js"></script>
+  <script src="../js/model.js"></script>
+  <script src="../js/ui.js"></script>
+  <script src="../js/tab-map.js"></script>
+  <script src="../js/tab-route.js"></script>
+  <script src="../js/tab-activities.js"></script>
+  <script src="../js/tab-campsites.js"></script>
+  <script src="../js/tab-gear.js"></script>
+  <script src="../js/tab-food.js"></script>
+  <script src="../js/tab-budget.js"></script>
+  <script src="../js/tab-log.js"></script>
+
+  <script>
+  (function () {
+    var RT = window.RT;
+    var tab = (location.search.match(/tab=([\w-]+)/) || [])[1] || 'gear';
+    try { localStorage.setItem('roadtrippers.tab', tab); } catch (e) { }
+
+    RT.store.open('preview');
+    RT.model.wipeDemo();
+    RT.model.seed();
+    RT.model.saveSettings({ tripName: 'Noorwegen — zomer', personA: 'Jonne', personB: 'Sam', capacityA: 16, capacityB: 14 });
+
+    // extra gear zodat het raster er vol en echt uitziet
+    var conts = {};
+    RT.model.containers().forEach(function (c) { conts[c.owner + ':' + c.name] = c.id; });
+
+    function put(name, cat, w, h, kg, cont, x, y, packed) {
+      RT.store.put('gear', {
+        name: name, cat: cat, w: w, h: h, weight: kg, qty: 1,
+        loc: cont ? { type: 'grid', containerId: conts[cont], x: x, y: y } : { type: 'stash' },
+        packed: !!packed, note: ''
+      });
+    }
+
+    put('Regenjas',       'kleding',     2, 2, 0.42, 'a:Rugzak', 0, 3, true);
+    put('Wandelschoenen', 'kleding',     2, 2, 1.25, 'a:Rugzak', 2, 2);
+    put('Thermosfles',    'water',       1, 2, 0.38, 'a:Rugzak', 4, 0, true);
+    put('Boek',           'overig',      1, 2, 0.31, 'a:Rugzak', 4, 2);
+    put('Powerbank',      'elektronica', 1, 1, 0.36, 'a:Heuptas', 1, 0, true);
+    put('Zonnebril',      'overig',      1, 1, 0.04, 'a:Heuptas', 2, 0);
+    put('Paspoorten',     'documenten',  2, 1, 0.08, 'a:Heuptas', 0, 1, true);
+
+    put('Slaapmat',       'slapen',      2, 2, 0.48, 'b:Rugzak', 0, 3);
+    put('Fleece trui',    'kleding',     2, 2, 0.34, 'b:Rugzak', 2, 1, true);
+    put('Toilettas',      'hygiene',     2, 2, 0.61, 'b:Rugzak', 0, 5);
+    put('Camera',         'elektronica', 2, 2, 0.87, 'b:Rugzak', 2, 3, true);
+    put('Zaklamp',        'elektronica', 1, 1, 0.11, 'b:Heuptas', 0, 0);
+    put('Kaart & kompas', 'navigatie',   2, 1, 0.14, 'b:Heuptas', 1, 1, true);
+
+    put('Koelbox',        'eten',        3, 2, 4.20, 'shared:Kofferbak', 0, 2, true);
+    put('Campingstoelen', 'auto',        2, 3, 5.40, 'shared:Kofferbak', 3, 2);
+    put('Gereedschapskist','gereedschap',2, 2, 3.10, 'shared:Kofferbak', 6, 2, true);
+    put('Krik + krikset', 'auto',        2, 1, 2.80, 'shared:Kofferbak', 0, 4);
+    put('Vouwtafel',      'auto',        2, 1, 3.90, 'shared:Kofferbak', 6, 4, true);
+
+    put('Regenponcho',    'kleding',     1, 2, 0.19, null);
+    put('Muggenspray',    'medisch',     1, 1, 0.12, null);
+    put('Klapstoeltje',   'auto',        2, 2, 2.30, null);
+
+    // uitrusting aan de slots hangen
+    RT.store.put('gear', { name: 'Wollen muts', cat: 'kleding', w: 1, h: 1, weight: 0.08, qty: 1, packed: true, loc: { type: 'slot', person: 'a', slot: 'hoofd' } });
+    RT.store.put('gear', { name: 'Softshell jas', cat: 'kleding', w: 2, h: 2, weight: 0.64, qty: 1, packed: true, loc: { type: 'slot', person: 'a', slot: 'jas' } });
+    RT.store.put('gear', { name: 'Pet', cat: 'kleding', w: 1, h: 1, weight: 0.06, qty: 1, packed: true, loc: { type: 'slot', person: 'b', slot: 'hoofd' } });
+    RT.store.put('gear', { name: 'Donsjas', cat: 'kleding', w: 2, h: 2, weight: 0.51, qty: 1, packed: true, loc: { type: 'slot', person: 'b', slot: 'jas' } });
+
+    RT.ui.mount();
+    RT.ui.go(tab);
+
+    // Controle: botsen er items, of vallen ze buiten hun container?
+    var problems = [];
+    RT.model.containers().forEach(function (c) {
+      var occ = {};
+      RT.model.gearIn(c.id).forEach(function (g) {
+        if (g.loc.x + g.w > c.cols || g.loc.y + g.h > c.rows) {
+          problems.push(g.name + ' valt buiten ' + c.owner + ':' + c.name);
+        }
+        for (var dy = 0; dy < g.h; dy++) for (var dx = 0; dx < g.w; dx++) {
+          var k = (g.loc.x + dx) + ',' + (g.loc.y + dy);
+          if (occ[k]) problems.push(c.owner + ':' + c.name + ' ' + k + ': ' + g.name + ' ↔ ' + occ[k]);
+          occ[k] = g.name;
+        }
+      });
+    });
+    document.title = problems.length
+      ? 'LAYOUT PROBLEMEN (' + problems.length + '): ' + problems.join(' | ')
+      : 'LAYOUT OK — ' + RT.store.count('gear') + ' items';
+  })();
+  </script>
+</body>
+</html>
